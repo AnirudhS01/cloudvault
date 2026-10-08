@@ -4,7 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 STACK="${STACK:-cloudvault}"
-export AWS_REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-ap-south-1}}"
+export AWS_REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-ap-southeast-2}}"
 export AWS_PAGER=""
 
 die() { echo; echo "ERROR: $*" >&2; exit 1; }

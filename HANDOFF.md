@@ -38,7 +38,7 @@ You'll get an email if anything starts costing money.
 
 ## Step 1: Pick a region
 
-In the top-right corner of the console, click the region name and choose **Asia Pacific (Mumbai) `ap-south-1`**. Any region works, but stay in the same one for the whole guide.
+In the top-right corner of the console, click the region name and choose **Asia Pacific (Sydney) `ap-southeast-2`**. You must stay in this one region for the whole guide — this project is locked to a single selected Region by a service control policy, and calls in any other Region are denied.
 
 ## Step 2: Open CloudShell
 
@@ -98,6 +98,7 @@ If Anirudh changes the code, paste the same one-line command from Step 3 + 4 aga
 |---|---|
 | `Unable to locate credentials` | You're not in CloudShell. Open CloudShell from the console. |
 | `AccessDenied` or `not authorized` during deploy | The account needs admin permissions. Use the root user or an admin IAM user. |
+| `... not authorized to perform: cloudformation:... with an explicit deny in a service control policy ...` | You're in the wrong Region. Switch the console and CloudShell back to **Asia Pacific (Sydney) `ap-southeast-2`** and re-run. Only that Region (plus global services like CloudFront) is allowed. |
 | Deploy fails with `CloudFront ... account must be verified` | New accounts sometimes need to be verified for CloudFront. Open an AWS Support case ("Account verification for CloudFront") or wait 24 hours. Billing must be activated. |
 | `Deploy failed` | The script prints the reason. Send those lines to Anirudh, then run the same command again. It cleans up the failed attempt by itself. |
 | Site shows `AccessDenied` XML | The files haven't been uploaded yet. Re-run `bash deploy.sh`. |
@@ -115,10 +116,14 @@ bash destroy.sh
 
 It asks you to type `yes`. **This deletes all users and all stored data**, so take your screenshots first.
 
-## Optional: use a different stack name or region
+## Optional: use a different stack name (same region)
 
 ```bash
-STACK=my-vault AWS_REGION=us-east-1 bash deploy.sh
+STACK=my-vault AWS_REGION=ap-southeast-2 bash deploy.sh
 ```
+
+(Keep `ap-southeast-2`. Other Regions are denied by the project's service control policy.)
+
+> Deploying from your own laptop instead of CloudShell? Prefix each command with your CLI profile, e.g. `AWS_PROFILE=cloudvault STACK=cloudvault AWS_REGION=ap-southeast-2 bash deploy.sh`.
 
 (Run it from inside the downloaded folder.)

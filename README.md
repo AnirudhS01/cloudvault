@@ -15,4 +15,8 @@ Deploy in AWS CloudShell:
 curl -sL https://github.com/AnirudhS01/cloudvault/archive/refs/heads/main.tar.gz | tar xz && cd cloudvault-main && bash deploy.sh
 ```
 
+The scripts default to `ap-southeast-2` (Sydney). This project is locked to that selected Region — other Regions are denied by its service control policy.
+
+Live demo (Sydney): `https://d20p41tb1x6jjr.cloudfront.net`
+
 Tests: `node test.mjs` (crypto) and `node test-lambda.cjs` (API logic).

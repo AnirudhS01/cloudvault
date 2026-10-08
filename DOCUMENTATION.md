@@ -362,7 +362,7 @@ uid=44fe…  id=META        blob={…}                         ← another user,
 
 ## 10. API specification
 
-Base URL: the `ApiUrl` stack output, for example `https://abc123.execute-api.ap-south-1.amazonaws.com`.
+Base URL: the `ApiUrl` stack output, for example `https://abc123.execute-api.ap-southeast-2.amazonaws.com`.
 All routes require the header `Authorization: <Cognito ID token>`. Without a valid token API Gateway returns **401** and **the Lambda is never invoked**.
 
 | Method and path | Body | Success | Errors |

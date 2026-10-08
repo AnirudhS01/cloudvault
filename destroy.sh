@@ -2,7 +2,7 @@
 # Deletes everything CloudVault created (site, users, data). Run in AWS CloudShell.
 set -euo pipefail
 STACK="${STACK:-cloudvault}"
-export AWS_REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-ap-south-1}}"
+export AWS_REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-ap-southeast-2}}"
 export AWS_PAGER=""
 read -r -p "This permanently deletes the '$STACK' stack and ALL its users and data. Type yes: " a
 [ "$a" = "yes" ] || { echo "Cancelled."; exit 1; }
