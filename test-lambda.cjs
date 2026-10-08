@@ -1,0 +1,23 @@
+const fs = require("fs"), Module = require("module");
+const y = fs.readFileSync("infra/template.yaml", "utf8");
+const code = y.split("ZipFile: |\n")[1].split("\n  Api:")[0].split("\n").map(l => l.slice(10)).join("\n");
+console.log("inline bytes:", Buffer.byteLength(code), "(limit 4096)");
+const calls = [];
+const sdk = { DynamoDBClient: class { send(c) { calls.push(c); if (c.i.ConditionExpression && calls.filter(x=>x.i.ConditionExpression).length>1) { const e = new Error("x"); e.name="ConditionalCheckFailedException"; throw e; } return { Items: [{ id:{S:"META"}, blob:{S:"{}"} }] }; } } };
+for (const n of ["Query","PutItem","DeleteItem"]) sdk[n+"Command"] = class { constructor(i){ this.i=i; this.n=n; } };
+const m = new Module("x"); m.require = (k) => sdk; 
+const f = new Function("require","exports", code); const ex = {}; f(m.require, ex);
+const ev = (method, id, body) => ({ requestContext:{ authorizer:{jwt:{claims:{sub:"U1"}}}, http:{method} }, pathParameters: id?{id}:undefined, body });
+(async () => {
+  const assert = require("assert");
+  assert.equal((await ex.handler(ev("GET"))).statusCode, 200);
+  assert.equal(calls[0].i.ExpressionAttributeValues[":u"].S, "U1", "must scope to caller sub");
+  assert.equal((await ex.handler(ev("PUT","../x","{}"))).statusCode, 400);
+  assert.equal((await ex.handler(ev("PUT","E-"+"a".repeat(36),"x".repeat(9000)))).statusCode, 400);
+  assert.equal((await ex.handler(ev("PUT","META","{}"))).statusCode, 200);
+  assert.equal((await ex.handler(ev("PUT","META","{}"))).statusCode, 409, "META write-once");
+  assert.equal((await ex.handler(ev("DELETE","META"))).statusCode, 400);
+  assert.equal((await ex.handler(ev("DELETE","E-"+"a".repeat(36)))).statusCode, 204);
+  assert.equal(calls.at(-1).i.Key.uid.S, "U1");
+  console.log("lambda ok");
+})();

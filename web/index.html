@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CloudVault</title>
+<link rel="icon" href="logo.svg">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="msg" role="alert"></div>
+
+<!-- ===== Sign in / sign up / verify / unlock: one centred card ===== -->
+<main id="gate" class="gate">
+  <div class="brand"><img src="logo.svg" alt="" width="64" height="64"><h1>CloudVault</h1>
+    <p>Your passwords, encrypted before they ever leave your device.</p></div>
+
+  <form id="auth" class="card">
+    <h2>Welcome back</h2>
+    <label>Email<input id="email" type="email" placeholder="you@example.com" autocomplete="username" required></label>
+    <label>Account password<input id="pw" type="password" placeholder="••••••••••" autocomplete="current-password" required></label>
+    <button type="submit" class="primary">Sign in</button>
+    <button type="button" id="signup" class="ghost">Create a new account</button>
+    <small>New accounts: 10+ characters with upper case, lower case and a number.</small>
+  </form>
+
+  <form id="confirm" class="card" hidden>
+    <h2>Check your email ✉️</h2>
+    <p class="hint">We sent a 6-digit verification code.</p>
+    <input id="code" inputmode="numeric" placeholder="123456" autocomplete="one-time-code" required>
+    <button type="submit" class="primary">Verify</button>
+  </form>
+
+  <form id="unlock" class="card" hidden>
+    <h2 id="unlockTitle">Unlock vault</h2>
+    <p id="unlockHelp" class="hint"></p>
+    <input id="mp" type="password" placeholder="Master passphrase" autocomplete="off" required>
+    <input id="mp2" type="password" placeholder="Repeat master passphrase" autocomplete="off" hidden>
+    <button type="submit" class="primary">Unlock</button>
+    <button type="button" id="out1" class="ghost">Sign out</button>
+  </form>
+
+  <ul class="features">
+    <li>🔒 <b>Zero-knowledge</b><span>AES-256 in your browser</span></li>
+    <li>☁️ <b>Hosted on AWS</b><span>Cognito · Lambda · DynamoDB</span></li>
+    <li>🚫 <b>We can't read it</b><span>Only ciphertext is stored</span></li>
+  </ul>
+</main>
+
+<!-- ===== Dashboard ===== -->
+<div id="vault" hidden>
+  <header class="top">
+    <div class="logo"><img src="logo.svg" alt="" width="32" height="32"> CloudVault</div>
+    <div class="who"><span id="who"></span><button id="out2" class="ghost">🔓 Lock &amp; sign out</button></div>
+  </header>
+
+  <main class="wrap">
+    <section class="stats">
+      <div class="stat"><span>Saved passwords</span><b id="count">0</b></div>
+      <div class="stat"><span>Encryption</span><b>AES-256-GCM</b></div>
+      <div class="stat"><span>Status</span><b class="ok">● Unlocked</b></div>
+    </section>
+
+    <div class="toolbar">
+      <input id="search" type="search" placeholder="🔍 Search passwords…" autocomplete="off">
+      <button id="openAdd" class="primary">＋ Add password</button>
+    </div>
+
+    <div id="list" class="grid"></div>
+    <div id="empty" class="empty" hidden></div>
+  </main>
+</div>
+
+<dialog id="addDlg">
+  <form id="add">
+    <h2>Add password</h2>
+    <label>Site or app<input id="site" placeholder="github.com" autocomplete="off" required></label>
+    <label>Username or email<input id="user" placeholder="you@example.com" autocomplete="off" required></label>
+    <label>Password
+      <div class="inline">
+        <input id="pass" type="password" placeholder="••••••••••" autocomplete="new-password" required>
+        <button type="button" id="gen" class="ghost">🎲 Generate</button>
+      </div>
+    </label>
+    <div class="meter"><i id="meter"></i></div>
+    <small class="hint">Encrypted in your browser before it is saved.</small>
+    <div class="inline end">
+      <button type="button" id="cancel" class="ghost">Cancel</button>
+      <button type="submit" class="primary">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

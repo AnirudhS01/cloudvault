@@ -1,0 +1,249 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: CloudVault - zero-knowledge password vault (S3+CloudFront, Cognito, API Gateway, Lambda, DynamoDB)
+
+Resources:
+  # ---------- Auth ----------
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UsernameAttributes: [email]
+      AutoVerifiedAttributes: [email]
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 10
+          RequireLowercase: true
+          RequireUppercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref UserPool
+      GenerateSecret: false # browser app: no secret possible
+      ExplicitAuthFlows: [ALLOW_USER_PASSWORD_AUTH, ALLOW_REFRESH_TOKEN_AUTH]
+      PreventUserExistenceErrors: ENABLED
+      IdTokenValidity: 8
+      AccessTokenValidity: 8
+      TokenValidityUnits: { IdToken: hours, AccessToken: hours, RefreshToken: days }
+
+  # ---------- Data ----------
+  Table:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: uid, AttributeType: S }
+        - { AttributeName: id, AttributeType: S }
+      KeySchema:
+        - { AttributeName: uid, KeyType: HASH }
+        - { AttributeName: id, KeyType: RANGE }
+      PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true }
+      SSESpecification: { SSEEnabled: true } # KMS-managed encryption at rest (on top of client-side encryption)
+
+  # ---------- API ----------
+  FnRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - { Effect: Allow, Principal: { Service: lambda.amazonaws.com }, Action: "sts:AssumeRole" }
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: table-access # least privilege: three actions, one table
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ["dynamodb:Query", "dynamodb:PutItem", "dynamodb:DeleteItem"]
+                Resource: !GetAtt Table.Arn
+
+  Fn:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: nodejs22.x
+      Handler: index.handler
+      Role: !GetAtt FnRole.Arn
+      Timeout: 10
+      MemorySize: 128
+      Environment: { Variables: { TABLE: !Ref Table } }
+      Code:
+        ZipFile: |
+          // Stores/returns opaque encrypted blobs, scoped to the caller's Cognito user id (sub).
+          const { DynamoDBClient, QueryCommand, PutItemCommand, DeleteItemCommand } = require("@aws-sdk/client-dynamodb");
+          const db = new DynamoDBClient(), T = process.env.TABLE;
+          const out = (s, b) => ({ statusCode: s, headers: { "content-type": "application/json" }, body: JSON.stringify(b ?? {}) });
+          exports.handler = async (e) => {
+            const uid = e.requestContext.authorizer.jwt.claims.sub, m = e.requestContext.http.method, id = e.pathParameters?.id;
+            try {
+              if (m === "GET") {
+                // ponytail: single Query = max 1MB per user (~thousands of entries); add pagination if ever needed
+                const r = await db.send(new QueryCommand({ TableName: T, KeyConditionExpression: "uid = :u", ExpressionAttributeValues: { ":u": { S: uid } } }));
+                return out(200, r.Items.map((i) => ({ id: i.id.S, blob: i.blob.S })));
+              }
+              if (!/^(META|E-[0-9a-f-]{36})$/.test(id || "")) return out(400, { error: "bad id" });
+              if (m === "DELETE") {
+                if (id === "META") return out(400, { error: "cannot delete META" });
+                await db.send(new DeleteItemCommand({ TableName: T, Key: { uid: { S: uid }, id: { S: id } } }));
+                return out(204);
+              }
+              if (m === "PUT") {
+                if (typeof e.body !== "string" || e.body.length > 8000) return out(400, { error: "bad body" });
+                const p = { TableName: T, Item: { uid: { S: uid }, id: { S: id }, blob: { S: e.body } } };
+                if (id === "META") { p.ConditionExpression = "attribute_not_exists(#i)"; p.ExpressionAttributeNames = { "#i": "id" }; } // salt is write-once
+                await db.send(new PutItemCommand(p));
+                return out(200);
+              }
+              return out(405, { error: "method" });
+            } catch (err) {
+              if (err.name === "ConditionalCheckFailedException") return out(409, { error: "exists" });
+              console.error(err);
+              return out(500, { error: "server error" });
+            }
+          };
+
+  Api:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub "${AWS::StackName}-api"
+      ProtocolType: HTTP
+      CorsConfiguration:
+        AllowOrigins: [!Sub "https://${Distribution.DomainName}"]
+        AllowMethods: [GET, PUT, DELETE]
+        AllowHeaders: [authorization, content-type]
+
+  Authorizer:
+    Type: AWS::ApiGatewayV2::Authorizer
+    Properties:
+      ApiId: !Ref Api
+      AuthorizerType: JWT
+      Name: cognito
+      IdentitySource: ["$request.header.Authorization"]
+      JwtConfiguration:
+        Audience: [!Ref UserPoolClient]
+        Issuer: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}"
+
+  Integration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref Api
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt Fn.Arn
+      PayloadFormatVersion: "2.0"
+
+  RouteList:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref Api
+      RouteKey: "GET /vault"
+      Target: !Sub "integrations/${Integration}"
+      AuthorizationType: JWT
+      AuthorizerId: !Ref Authorizer
+
+  RoutePut:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref Api
+      RouteKey: "PUT /vault/{id}"
+      Target: !Sub "integrations/${Integration}"
+      AuthorizationType: JWT
+      AuthorizerId: !Ref Authorizer
+
+  RouteDelete:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref Api
+      RouteKey: "DELETE /vault/{id}"
+      Target: !Sub "integrations/${Integration}"
+      AuthorizationType: JWT
+      AuthorizerId: !Ref Authorizer
+
+  Stage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref Api
+      StageName: $default
+      AutoDeploy: true
+      DefaultRouteSettings: { ThrottlingRateLimit: 20, ThrottlingBurstLimit: 40 } # cost / abuse cap
+
+  InvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref Fn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/*"
+
+  # ---------- Static site ----------
+  Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        { BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true }
+
+  OAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "${AWS::StackName}-oac"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref Bucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: cloudfront.amazonaws.com }
+            Action: "s3:GetObject"
+            Resource: !Sub "${Bucket.Arn}/*"
+            Condition:
+              StringEquals:
+                "AWS:SourceArn": !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}"
+
+  Headers:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: !Sub "${AWS::StackName}-security-headers"
+        SecurityHeadersConfig:
+          ContentSecurityPolicy:
+            Override: true
+            ContentSecurityPolicy: !Sub "default-src 'self'; connect-src 'self' https://cognito-idp.${AWS::Region}.amazonaws.com https://*.execute-api.${AWS::Region}.amazonaws.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+          StrictTransportSecurity: { AccessControlMaxAgeSec: 63072000, IncludeSubdomains: true, Override: true }
+          ContentTypeOptions: { Override: true }
+          FrameOptions: { FrameOption: DENY, Override: true }
+          ReferrerPolicy: { ReferrerPolicy: no-referrer, Override: true }
+
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        DefaultRootObject: index.html
+        HttpVersion: http2and3
+        PriceClass: PriceClass_100
+        Origins:
+          - Id: s3
+            DomainName: !GetAtt Bucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt OAC.Id
+            S3OriginConfig: { OriginAccessIdentity: "" }
+        DefaultCacheBehavior:
+          TargetOriginId: s3
+          ViewerProtocolPolicy: redirect-to-https
+          Compress: true
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad # managed CachingDisabled: redeploys show instantly
+          ResponseHeadersPolicyId: !Ref Headers
+
+Outputs:
+  SiteUrl: { Value: !Sub "https://${Distribution.DomainName}" }
+  ApiUrl: { Value: !GetAtt Api.ApiEndpoint }
+  UserPoolId: { Value: !Ref UserPool }
+  ClientId: { Value: !Ref UserPoolClient }
+  Bucket: { Value: !Ref Bucket }
